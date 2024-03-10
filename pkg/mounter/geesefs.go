@@ -1,6 +1,7 @@
 package mounter
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -193,20 +194,23 @@ func (geesefs *geesefsMounter) Mount(target, volumeID string) error {
 			conn.ResetFailedUnit(unitName)
 		}
 	}
-	err = os.MkdirAll("/run/systemd/system/"+unitName+".d", 0755)
-	if err == nil {
-		// force & lazy unmount to cleanup possibly dead mountpoints
-		err = os.WriteFile(
-			"/run/systemd/system/"+unitName+".d/50-ExecStopPost.conf",
-			[]byte("[Service]\nExecStopPost=/bin/umount -f -l "+target+"\n"),
-			0600,
-		)
-		if err == nil {
-			_, err = conn.StartTransientUnit(unitName, "replace", newProps[0:len(newProps)-1], nil)
+
+	path := "/run/systemd/system/" + unitName + ".d"
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		err = os.MkdirAll(path, 0755)
+		if err != nil {
+			return fmt.Errorf("Error starting systemd unit %s on host: %v", unitName, err)
 		}
 	}
-	if err != nil {
-		return fmt.Errorf("Error starting systemd unit %s on host: %v", unitName, err)
+
+	// force & lazy unmount to cleanup possibly dead mountpoints
+	err = os.WriteFile(
+		"/run/systemd/system/"+unitName+".d/50-ExecStopPost.conf",
+		[]byte("[Service]\nExecStopPost=/bin/umount -f -l "+target+"\n"),
+		0600,
+	)
+	if err == nil {
+		_, err = conn.StartTransientUnit(unitName, "replace", newProps[0:len(newProps)-1], nil)
 	}
 	return waitForMount(target, 10*time.Second)
 }
